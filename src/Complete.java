@@ -38,6 +38,7 @@ public class Complete extends AnAction {
         if (document == null) {
             return;
         }
+        FileDocumentManager.getInstance().reloadFromDisk(document);
         VirtualFile virtualFile = FileDocumentManager.getInstance().getFile(document);
         if (virtualFile == null) {
             return;
@@ -66,6 +67,7 @@ public class Complete extends AnAction {
                 }
 
                 PsiFile psiFile = (PsiFile) originalFile.copy();
+                final Document documentCopy = psiFile.getViewProvider().getDocument();
 
                 CommandProcessor.getInstance().executeCommand(project, new Runnable() {
                     @Override
@@ -73,16 +75,20 @@ public class Complete extends AnAction {
                         ApplicationManager.getApplication().runWriteAction(new Runnable() {
                             @Override
                             public void run() {
-                                document.replaceString(offset, offset, CompletionUtilCore.DUMMY_IDENTIFIER);
+                                documentCopy.replaceString(offset, offset, CompletionUtilCore.DUMMY_IDENTIFIER);
                             }
                         });
                     }
                 }, "WRITE", null);
 
-                int newOffset = offset + 1;
+                // Reload PsiFile.
+                VirtualFile virtualFileCopy = FileDocumentManager.getInstance().getFile(documentCopy);
+                psiFile = PsiManager.getInstance(project).findFile(virtualFileCopy);
+
+                int newOffset = offset;
 
                 out.println("offset: " + newOffset);
-                out.println("fragment: " + document.getText().substring(newOffset - 10, newOffset) + "#");
+                out.println("fragment: " + documentCopy.getText().substring(newOffset - 10, newOffset) + "#");
 
                 PsiElement psiElement = psiFile.findElementAt(newOffset);
                 out.println("element: " + psiElement);
@@ -90,7 +96,7 @@ public class Complete extends AnAction {
 
                 Constructor<CompletionParameters> c = (Constructor<CompletionParameters>) CompletionParameters.class.getDeclaredConstructors()[0];
                 c.setAccessible(true);
-                CompletionParameters completionParameters = c.newInstance(psiElement, psiFile, CompletionType.BASIC, newOffset, 0, editor);
+                final CompletionParameters completionParameters = c.newInstance(psiElement, psiFile, CompletionType.BASIC, newOffset, 0, editor);
 
                 final StringBuilder stringBuilder = new StringBuilder();
                 Consumer<CompletionResult> consumer = new Consumer<CompletionResult>() {

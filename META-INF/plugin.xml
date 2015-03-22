@@ -45,7 +45,7 @@
 
     <module-components>
         <component>
-            <implementation-class>Comp</implementation-class>
+            <implementation-class>Mod</implementation-class>
         </component>
     </module-components>
 </idea-plugin>

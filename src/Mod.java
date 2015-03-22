@@ -1,16 +1,29 @@
-import com.intellij.openapi.module.ModuleComponent;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.module.Module;
+import com.intellij.openapi.module.ModuleComponent;
 import org.jetbrains.annotations.NotNull;
+
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * Created by tzn on 21/03/15.
  */
-public class Comp implements ModuleComponent {
-    public Comp(Module module) {
+public class Mod implements ModuleComponent {
+
+    private final Module module;
+
+    public Mod(Module module) {
+        this.module = module;
+    }
+
+    private ExecutorService getExecutorService() {
+        return Executors.newFixedThreadPool(10);
     }
 
     public void initComponent() {
-        // TODO: insert component initialization logic here
+        IdemCompletionService completionService = new IdemCompletionService(module);
+        ApplicationManager.getApplication().executeOnPooledThread(completionService);
     }
 
     public void disposeComponent() {
