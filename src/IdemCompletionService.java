@@ -3,7 +3,6 @@ import com.intellij.codeInsight.completion.CompletionResult;
 import com.intellij.codeInsight.completion.CompletionService;
 import com.intellij.codeInsight.completion.CompletionType;
 import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.command.CommandProcessor;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.fileEditor.FileEditor;
@@ -26,7 +25,6 @@ import java.io.PrintWriter;
 import java.lang.reflect.Constructor;
 import java.net.ServerSocket;
 import java.net.Socket;
-import java.util.concurrent.Callable;
 
 /**
  * Created by tzn on 21/03/15.
@@ -52,27 +50,6 @@ public class IdemCompletionService implements Runnable {
         return ApplicationManager.getApplication().runWriteAction(action);
     }
 
-    private <T> T executeCommand(final Computable<T> action) {
-        Project project = module.getProject();
-        final Object[] o = new Object[1];
-        CommandProcessor.getInstance().executeCommand(project, new Runnable() {
-            @Override
-            public void run() {
-                o[0] = runWriteAction(action);
-            }
-        }, "COMMAND", null);
-        return (T) o[0];
-    }
-
-    private void executePooled(final Computable<?> action) {
-        ApplicationManager.getApplication().executeOnPooledThread(new Callable<Object>() {
-            @Override
-            public Object call() throws Exception {
-                return runReadAction(action);
-            }
-        });
-    }
-
     private void loop() {
 
         final Project project = module.getProject();
@@ -80,41 +57,20 @@ public class IdemCompletionService implements Runnable {
         PsiFile originalFile = PsiManager.getInstance(project).findFile(virtualFile);
         final FileEditor selectedEditor = FileEditorManager.getInstance(project).openFile(virtualFile, false)[0];
 
-        Socket socket;
-        final PrintWriter out;
-        BufferedReader in;
+        ServerSocket serverSocket = null;
         try {
-            ServerSocket serverSocket = new ServerSocket(8080);
-            socket = serverSocket.accept();
-            out = new PrintWriter(socket.getOutputStream(), true);
-            in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-        } catch (Exception e) {
+            serverSocket = new ServerSocket(8080);
+        } catch (IOException e) {
             e.printStackTrace();
-            return;
         }
-
-        while (socket.isConnected()) {
-            String line = null;
+        while (serverSocket.isBound()) {
             try {
-                line = in.readLine();
-            } catch (IOException e) {
-                return;
+                Socket socket = serverSocket.accept();
+                socketLoop(socket);
+            } catch (Exception e) {
+                e.printStackTrace();
             }
-
-            if (line.contains("x")) {
-                break;
-            }
-
-
-            final int offset;
-            try {
-                offset = Integer.parseInt(line);
-            } catch (NumberFormatException e2) {
-                continue;
-            }
-
-            final PsiFile psiFile = (PsiFile) originalFile.copy();
-            final Document documentCopy = psiFile.getViewProvider().getDocument();
+        }
 
             /*
             CommandProcessor.getInstance().executeCommand(project, new Runnable() {
@@ -135,14 +91,34 @@ public class IdemCompletionService implements Runnable {
             VirtualFile virtualFileCopy = FileDocumentManager.getInstance().getFile(documentCopy);
             psiFile = PsiManager.getInstance(project).findFile(virtualFileCopy);
             */
+    }
 
+    private void socketLoop(Socket socket) throws Exception {
+        final Project project = module.getProject();
+        final VirtualFile virtualFile = VirtualFileManager.getInstance().findFileByUrl("file:///home/tzn/IdeaProjects/untitled/src/Test.java");
+        PsiFile originalFile = PsiManager.getInstance(project).findFile(virtualFile);
+
+        final FileEditor selectedEditor = FileEditorManager.getInstance(project).openFile(virtualFile, false)[0];
+        final PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
+        BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+
+        while (true) {
+            String line = in.readLine();
+
+            if (line.contains("x")) {
+                break;
+            }
+
+            int offset = Integer.parseInt(line);
+            final PsiFile psiFile = (PsiFile) originalFile.copy();
+            final Document documentCopy = psiFile.getViewProvider().getDocument();
             final int newOffset = offset;
 
             out.println("offset: " + newOffset);
             out.println("fragment: " + documentCopy.getText().substring(newOffset - 10, newOffset) + "#");
 
 
-            executePooled(new Computable<Object>() {
+            runWriteAction(new Computable<Object>() {
                 @Override
                 public Object compute() {
                     final PsiElement psiElement = psiFile.findElementAt(newOffset);
@@ -150,15 +126,8 @@ public class IdemCompletionService implements Runnable {
                     OpenFileDescriptor openFileDescriptor = new OpenFileDescriptor(project, virtualFile);
                     Editor editor = FileEditorManager.getInstance(project).getSelectedTextEditor();
 
-                    final CompletionParameters completionParameters;
-                    final Constructor<CompletionParameters> c = (Constructor<CompletionParameters>) CompletionParameters.class.getDeclaredConstructors()[0];
-                    c.setAccessible(true);
-                    try {
-                        completionParameters = c.newInstance(psiElement, psiFile, CompletionType.BASIC, newOffset, 0, editor);
-                    } catch (Exception e) {
-                        e.printStackTrace();
-                        return null;
-                    }
+                    CompletionParameters completionParameters =
+                            completionParameters(psiElement, psiFile, CompletionType.BASIC, newOffset, 0, editor);
 
                     final StringBuilder stringBuilder = new StringBuilder();
                     Consumer<CompletionResult> consumer = new Consumer<CompletionResult>() {
@@ -176,6 +145,23 @@ public class IdemCompletionService implements Runnable {
                     return null;
                 }
             });
+        }
+    }
+
+    private static CompletionParameters completionParameters(
+            PsiElement position,
+            PsiFile originalFile,
+            CompletionType completionType,
+            int offset,
+            int invocationCount,
+            Editor editor) {
+        final Constructor<CompletionParameters> c = (Constructor<CompletionParameters>) CompletionParameters.class.getDeclaredConstructors()[0];
+        c.setAccessible(true);
+        try {
+            return c.newInstance(position, originalFile, completionType, offset, invocationCount, editor);
+        } catch (Exception e) {
+            e.printStackTrace();
+            return null;
         }
     }
 }
